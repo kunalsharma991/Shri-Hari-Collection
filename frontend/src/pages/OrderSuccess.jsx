@@ -1,23 +1,31 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import { fetchOrder } from "../services/orderService";
+import { formatDate, formatPrice } from "../utils/format";
 import { FaCheckCircle, FaShoppingBag, FaBoxOpen, FaMapMarkerAlt, FaCalendarAlt, FaCopy } from "react-icons/fa";
 
 function OrderSuccess() {
   const navigate = useNavigate();
-  const [order] = useState(() => {
-    const savedOrder = sessionStorage.getItem("lastOrder");
-    return savedOrder ? JSON.parse(savedOrder) : null;
-  });
+  const location = useLocation();
+  const [order, setOrder] = useState(location.state?.order || null);
+  const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
 
+  // Fall back to the last order id when the page is reloaded
   useEffect(() => {
-    // If there's no order we should redirect the user home
-    if (!order) navigate("/");
+    if (order) return;
+    const lastOrderId = sessionStorage.getItem("lastOrderId");
+    if (!lastOrderId) {
+      navigate("/");
+      return;
+    }
+    fetchOrder(lastOrderId)
+      .then(setOrder)
+      .catch(() => setError("We could not load your order. Check My Orders for the latest status."));
   }, [order, navigate]);
 
-  // Copy order number to clipboard
   const copyOrderNumber = () => {
     if (order?.orderNumber) {
       navigator.clipboard.writeText(order.orderNumber);
@@ -25,6 +33,23 @@ function OrderSuccess() {
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  if (error) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-[60vh] flex items-center justify-center text-center px-6">
+          <div>
+            <p className="text-lg text-red-600 mb-4">{error}</p>
+            <Link to="/my-orders" className="bg-black text-yellow-400 px-6 py-3 rounded-full font-semibold hover:bg-gray-900 transition">
+              Go to My Orders
+            </Link>
+          </div>
+        </div>
+        <Footer />
+      </>
+    );
+  }
 
   if (!order) {
     return (
@@ -37,6 +62,8 @@ function OrderSuccess() {
       </>
     );
   }
+
+  const totalQuantity = (order.items || []).reduce((sum, item) => sum + item.quantity, 0);
 
   return (
     <>
@@ -76,12 +103,12 @@ function OrderSuccess() {
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-5 text-gray-400 text-sm">
               <span className="flex items-center gap-1.5">
                 <FaCalendarAlt className="text-yellow-500" />
-                {order.date}
+                {formatDate(order.createdAt)}
               </span>
               <span className="hidden sm:inline text-gray-700">|</span>
               <span className="flex items-center gap-1.5">
                 <FaMapMarkerAlt className="text-yellow-500" />
-                {order.customer.city}, {order.customer.state}
+                {order.city}, {order.state}
               </span>
             </div>
           </div>
@@ -94,25 +121,20 @@ function OrderSuccess() {
             </h2>
 
             <div className="space-y-4">
-              {order.items.map((item) => (
+              {(order.items || []).map((item) => (
                 <div
                   key={item.id}
                   className="flex items-center gap-4 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition"
                 >
-                  {/* Product Image */}
-                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0">
-                    <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                  </div>
-
                   {/* Product Details */}
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-gray-900 truncate">{item.name}</h3>
-                    <p className="text-sm text-gray-500">Qty: {item.quantity} × ₹{item.price}</p>
+                    <h3 className="font-semibold text-gray-900 truncate">{item.productName}</h3>
+                    <p className="text-sm text-gray-500">Qty: {item.quantity} × ₹{formatPrice(item.unitPrice)}</p>
                   </div>
 
                   {/* Subtotal */}
                   <p className="font-bold text-gray-900 flex-shrink-0">
-                    ₹{(item.price * item.quantity).toLocaleString("en-IN")}
+                    ₹{formatPrice(item.subtotal)}
                   </p>
                 </div>
               ))}
@@ -124,22 +146,26 @@ function OrderSuccess() {
             {/* Order Totals */}
             <div className="space-y-2 text-sm">
               <div className="flex justify-between text-gray-600">
-                <span>Subtotal ({order.totalQuantity} items)</span>
-                <span className="font-semibold text-gray-900">
-                  ₹{(order.grandTotal - order.shipping).toLocaleString("en-IN")}
-                </span>
+                <span>Subtotal ({totalQuantity} items)</span>
+                <span className="font-semibold text-gray-900">₹{formatPrice(order.subtotal)}</span>
               </div>
+              {Number(order.discountAmount) > 0 && (
+                <div className="flex justify-between text-gray-600">
+                  <span>Discount</span>
+                  <span className="font-semibold text-green-600">-₹{formatPrice(order.discountAmount)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-gray-600">
                 <span>Shipping</span>
                 <span className="font-semibold text-green-600">
-                  {order.shipping === 0 ? "FREE" : `₹${order.shipping}`}
+                  {Number(order.shippingAmount) === 0 ? "FREE" : `₹${formatPrice(order.shippingAmount)}`}
                 </span>
               </div>
               <div className="border-t border-gray-200 my-3"></div>
               <div className="flex justify-between items-center">
-                <span className="text-lg font-bold text-gray-900">Total Paid</span>
+                <span className="text-lg font-bold text-gray-900">Total</span>
                 <span className="text-2xl font-extrabold text-yellow-600">
-                  ₹{order.grandTotal.toLocaleString("en-IN")}
+                  ₹{formatPrice(order.totalAmount)}
                 </span>
               </div>
             </div>
@@ -152,19 +178,19 @@ function OrderSuccess() {
               Delivery Address
             </h2>
             <div className="text-gray-600 space-y-1">
-              <p className="font-semibold text-gray-900 text-lg">{order.customer.fullName}</p>
-              <p>{order.customer.address}</p>
-              <p>{order.customer.city}, {order.customer.state} - {order.customer.pincode}</p>
+              <p className="font-semibold text-gray-900 text-lg">{order.customerName}</p>
+              <p>{order.shippingAddress}</p>
+              <p>{order.city}, {order.state} - {order.pincode}</p>
               <p className="mt-2">
-                <span className="text-gray-500">Phone:</span> {order.customer.mobile}
+                <span className="text-gray-500">Phone:</span> {order.customerMobile}
               </p>
               <p>
-                <span className="text-gray-500">Email:</span> {order.customer.email}
+                <span className="text-gray-500">Email:</span> {order.customerEmail}
               </p>
               <p className="mt-2">
                 <span className="text-gray-500">Payment:</span>{" "}
                 <span className="font-semibold">
-                  {order.customer.paymentMethod === "cod" ? "Cash On Delivery" : "Online Payment"}
+                  {order.paymentMethod === "COD" ? "Cash On Delivery" : "Online Payment"}
                 </span>
               </p>
             </div>
@@ -179,14 +205,12 @@ function OrderSuccess() {
               <FaShoppingBag />
               Continue Shopping
             </Link>
-            <a
-              href="https://wa.me/918859000084"
-              target="_blank"
-              rel="noreferrer"
-              className="flex-1 flex items-center justify-center gap-2 border-2 border-green-500 text-green-600 py-4 rounded-full font-bold text-lg hover:bg-green-50 hover:scale-[1.02] active:scale-100 transition-all duration-300"
+            <Link
+              to={`/orders/${order.id}`}
+              className="flex-1 flex items-center justify-center gap-2 border-2 border-gray-200 text-gray-700 py-4 rounded-full font-bold text-lg hover:border-black hover:text-black transition-all duration-300"
             >
-              Track on WhatsApp
-            </a>
+              View Order Details
+            </Link>
           </div>
 
           {/* ─── Help Section ─── */}

@@ -1,14 +1,19 @@
-import api from "./axiosConfig";
+import api, { unwrap } from "./axiosConfig";
 
-export async function login(identifier, password) {
-  // Placeholder: send to /auth/login when backend ready
-  return api.post("/auth/login", { identifier, password });
+export async function login(email, password) {
+  return unwrap(await api.post("/auth/login", { email, password }));
 }
 
-export async function register(payload) {
-  return api.post("/auth/register", payload);
+export async function register({ fullName, email, mobile, password, confirmPassword }) {
+  return unwrap(
+    await api.post("/auth/register", { fullName, email, mobile, password, confirmPassword })
+  );
 }
 
-export async function me() {
-  return api.get("/auth/me");
+export async function fetchCurrentUser() {
+  return unwrap(await api.get("/auth/me"));
+}
+
+export async function logout(refreshToken) {
+  return unwrap(await api.post("/auth/logout", { refreshToken }));
 }

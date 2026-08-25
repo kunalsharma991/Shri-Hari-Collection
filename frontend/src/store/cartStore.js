@@ -1,64 +1,91 @@
 import { create } from "zustand";
+import * as cartService from "../services/cartService";
+import { getErrorMessage } from "../services/axiosConfig";
+import { getAccessToken } from "../services/tokenStorage";
 
+// Server-backed cart: every mutation returns the full cart from the backend.
 const useCartStore = create((set, get) => ({
-  cart: [],
+  items: [],
+  cartTotal: 0,
+  totalItemCount: 0,
+  loading: false,
+  updatingItemId: null,
+  error: null,
 
-  // Add product to cart; if already exists, increase quantity instead of duplicate
-  addToCart: (product) =>
-    set((state) => {
-      const existing = state.cart.find((item) => item.id === product.id);
-      if (existing) {
-        return {
-          cart: state.cart.map((item) =>
-            item.id === product.id
-              ? { ...item, quantity: item.quantity + (product.quantity || 1) }
-              : item
-          ),
-        };
-      }
-      return {
-        cart: [...state.cart, { ...product, quantity: product.quantity || 1 }],
-      };
+  applyCart: (cart) =>
+    set({
+      items: cart?.items || [],
+      cartTotal: Number(cart?.cartTotal || 0),
+      totalItemCount: cart?.totalItemCount || 0,
     }),
 
-  // Increase quantity of an item by 1
-  increaseQuantity: (id) =>
-    set((state) => ({
-      cart: state.cart.map((item) =>
-        item.id === id ? { ...item, quantity: item.quantity + 1 } : item
-      ),
-    })),
-
-  // Decrease quantity by 1; never goes below 1
-  decreaseQuantity: (id) =>
-    set((state) => ({
-      cart: state.cart.map((item) =>
-        item.id === id && item.quantity > 1
-          ? { ...item, quantity: item.quantity - 1 }
-          : item
-      ),
-    })),
-
-  // Remove item completely from cart
-  removeFromCart: (id) =>
-    set((state) => ({
-      cart: state.cart.filter((item) => item.id !== id),
-    })),
-
-  // Clear entire cart after order is placed
-  clearCart: () => set({ cart: [] }),
-
-  // Get total item count (sum of quantities)
-  getTotalQuantity: () => {
-    const state = get();
-    return state.cart.reduce((sum, item) => sum + item.quantity, 0);
+  fetchCart: async () => {
+    if (!getAccessToken()) {
+      set({ items: [], cartTotal: 0, totalItemCount: 0, error: null });
+      return;
+    }
+    set({ loading: true, error: null });
+    try {
+      get().applyCart(await cartService.fetchCart());
+      set({ loading: false });
+    } catch (error) {
+      set({ loading: false, error: getErrorMessage(error, "Unable to load your cart.") });
+    }
   },
 
-  // Get grand total price
-  getTotalPrice: () => {
-    const state = get();
-    return state.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  addToCart: async (productId, quantity = 1) => {
+    if (!getAccessToken()) {
+      return { success: false, requiresAuth: true, message: "Please log in to add items to your cart." };
+    }
+    try {
+      get().applyCart(await cartService.addCartItem(productId, quantity));
+      return { success: true };
+    } catch (error) {
+      const message = getErrorMessage(error, "Unable to add this item to your cart.");
+      set({ error: message });
+      return { success: false, message };
+    }
   },
+
+  updateQuantity: async (itemId, quantity) => {
+    if (quantity < 1) return { success: false, message: "Quantity must be at least 1." };
+    set({ updatingItemId: itemId, error: null });
+    try {
+      get().applyCart(await cartService.updateCartItem(itemId, quantity));
+      set({ updatingItemId: null });
+      return { success: true };
+    } catch (error) {
+      const message = getErrorMessage(error, "Unable to update the quantity.");
+      set({ updatingItemId: null, error: message });
+      return { success: false, message };
+    }
+  },
+
+  removeItem: async (itemId) => {
+    set({ updatingItemId: itemId, error: null });
+    try {
+      await cartService.removeCartItem(itemId);
+      set({ updatingItemId: null });
+      await get().fetchCart();
+      return { success: true };
+    } catch (error) {
+      const message = getErrorMessage(error, "Unable to remove this item.");
+      set({ updatingItemId: null, error: message });
+      return { success: false, message };
+    }
+  },
+
+  clearCart: async () => {
+    try {
+      await cartService.clearCart();
+    } catch {
+      // Ignore: the cart is also cleared server-side when an order is placed.
+    }
+    set({ items: [], cartTotal: 0, totalItemCount: 0 });
+  },
+
+  // Local reset used on logout, without touching the server cart
+  reset: () => set({ items: [], cartTotal: 0, totalItemCount: 0, error: null }),
 }));
 
 export default useCartStore;

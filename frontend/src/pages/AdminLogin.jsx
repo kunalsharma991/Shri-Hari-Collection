@@ -18,7 +18,7 @@ function AdminLogin() {
     if (error) setError("");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.email.trim() || !formData.password.trim()) {
       setError("Please fill in all fields.");
@@ -26,18 +26,18 @@ function AdminLogin() {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      const result = login(formData.email, formData.password);
-      setLoading(false);
+    const result = await login(formData.email.trim(), formData.password);
+    setLoading(false);
 
-      if (result.success && useAuthStore.getState().role === "admin") {
-        navigate("/admin/dashboard");
-      } else {
-        // Logout if not admin
-        useAuthStore.getState().logout();
-        setError("Access denied. Admin credentials required.");
-      }
-    }, 800);
+    if (result.success && useAuthStore.getState().role === "admin") {
+      navigate("/admin/dashboard");
+    } else if (result.success) {
+      // Signed in, but without admin privileges
+      await useAuthStore.getState().logout();
+      setError("Access denied. Admin credentials required.");
+    } else {
+      setError(result.message);
+    }
   };
 
   return (
@@ -71,7 +71,7 @@ function AdminLogin() {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  placeholder="admin@shrihari.com"
+                  placeholder="Enter admin email"
                   className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-700 bg-gray-800 text-white placeholder-gray-500 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/20 transition-all"
                 />
               </div>
@@ -116,17 +116,6 @@ function AdminLogin() {
               )}
             </button>
           </form>
-
-          {/* Demo hint */}
-          <div className="mt-5 p-4 bg-gray-800/50 rounded-xl text-sm border border-gray-700">
-            <p className="font-semibold text-gray-300 mb-1">Demo Admin:</p>
-            <p className="text-gray-500">
-              Email: <span className="font-mono text-gray-300">admin@shrihari.com</span>
-            </p>
-            <p className="text-gray-500">
-              Password: <span className="font-mono text-gray-300">admin123</span>
-            </p>
-          </div>
         </div>
       </div>
     </div>

@@ -29,6 +29,7 @@ import Checkout from "./pages/Checkout";
 import OrderSuccess from "./pages/OrderSuccess";
 import Profile from "./pages/Profile";
 import MyOrders from "./pages/MyOrders";
+import OrderDetails from "./pages/OrderDetails";
 import AddressBook from "./pages/AddressBook";
 import Wishlist from "./pages/Wishlist";
 
@@ -72,7 +73,8 @@ function App() {
         <Route path="/return-refund-policy" element={<ReturnPolicy />} />
 
         {/* Orders alias */}
-        <Route path="/orders" element={<MyOrders />} />
+        <Route path="/orders" element={<ProtectedRoute><MyOrders /></ProtectedRoute>} />
+        <Route path="/orders/:id" element={<ProtectedRoute><OrderDetails /></ProtectedRoute>} />
         <Route path="/shipping-policy" element={<ShippingPolicy />} />
 
         {/* ─── Protected Routes (require login) ─── */}
