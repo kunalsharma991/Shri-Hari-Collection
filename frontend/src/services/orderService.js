@@ -1,9 +1,19 @@
-import api from "./axiosConfig";
+import api, { unwrap } from "./axiosConfig";
 
-export async function placeOrder(orderPayload) {
-  return api.post("/orders", orderPayload);
+export async function placeOrder({ shippingAddress, city, state, pincode, paymentMethod }) {
+  return unwrap(
+    await api.post("/orders", { shippingAddress, city, state, pincode, paymentMethod })
+  );
 }
 
-export async function fetchOrders() {
-  return api.get("/orders");
+export async function fetchOrders({ page = 0, size = 12 } = {}) {
+  return unwrap(await api.get("/orders", { params: { page, size } }));
+}
+
+export async function fetchOrder(id) {
+  return unwrap(await api.get(`/orders/${id}`));
+}
+
+export async function cancelOrder(id) {
+  return unwrap(await api.patch(`/orders/${id}/cancel`));
 }

@@ -1,6 +1,6 @@
 import { FaTimes } from "react-icons/fa";
 
-function FilterSidebar({ categories, selectedCategory, setSelectedCategory, priceRange, setPriceRange, clearFilters, activeFiltersCount, products }) {
+function FilterSidebar({ categories, selectedCategory, setSelectedCategory, priceRange, setPriceRange, clearFilters, activeFiltersCount }) {
   return (
     <div className="space-y-6">
       {/* Categories */}
@@ -9,18 +9,15 @@ function FilterSidebar({ categories, selectedCategory, setSelectedCategory, pric
         <div className="space-y-2">
           {categories.map((cat) => (
             <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id)}
               className={`block w-full text-left px-4 py-2 rounded-lg text-sm transition ${
-                selectedCategory === cat
+                selectedCategory === cat.id
                   ? "bg-yellow-50 text-yellow-700 font-semibold"
                   : "text-gray-600 hover:bg-gray-50"
               }`}
             >
-              {cat}
-              <span className="text-gray-400 ml-1">
-                ({cat === "All" ? products.length : products.filter((p) => p.category === cat).length})
-              </span>
+              {cat.name}
             </button>
           ))}
         </div>

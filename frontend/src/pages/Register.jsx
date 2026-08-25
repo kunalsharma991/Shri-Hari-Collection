@@ -41,7 +41,7 @@ function Register() {
     return errs;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const validationErrors = validate();
     if (Object.keys(validationErrors).length > 0) {
@@ -50,15 +50,13 @@ function Register() {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      const result = register(formData);
-      setLoading(false);
-      if (result.success) {
-        navigate("/");
-      } else {
-        setErrors({ general: result.message });
-      }
-    }, 800);
+    const result = await register(formData);
+    setLoading(false);
+    if (result.success) {
+      navigate("/");
+    } else {
+      setErrors({ general: result.message });
+    }
   };
 
   // Uses shared InputField component

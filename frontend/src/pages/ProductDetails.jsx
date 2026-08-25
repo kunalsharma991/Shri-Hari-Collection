@@ -1,24 +1,94 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { useState } from "react";
-import products from "../data/products";
+import { useCallback, useEffect, useState } from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import LoadingSpinner from "../components/LoadingSpinner";
 import useCartStore from "../store/cartStore";
+import useAuthStore from "../store/authStore";
+import { fetchProduct, fetchProductBySlug, fetchProducts } from "../services/productService";
+import { getErrorMessage } from "../services/axiosConfig";
+import { discountPercent, effectivePrice, formatPrice } from "../utils/format";
+
+const IMAGE_FALLBACK =
+  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="450"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23999" font-size="20">Image Not Available</text></svg>';
 
 function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const product = products.find((p) => p.id === parseInt(id));
   const [quantity, setQuantity] = useState(1);
   const addToCart = useCartStore((state) => state.addToCart);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
-  if (!product) {
+  const [product, setProduct] = useState(null);
+  const [related, setRelated] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [cartMessage, setCartMessage] = useState(null);
+
+  // The route param is a numeric id for backend products, but slugs also resolve
+  const loadProduct = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setCartMessage(null);
+    try {
+      const data = /^\d+$/.test(id) ? await fetchProduct(id) : await fetchProductBySlug(id);
+      setProduct(data);
+      setQuantity(1);
+
+      if (data?.categoryId) {
+        const page = await fetchProducts({ category: data.categoryId, size: 4 });
+        setRelated((page?.content || []).filter((p) => p.id !== data.id).slice(0, 3));
+      } else {
+        setRelated([]);
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, "Unable to load this product."));
+      setProduct(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadProduct();
+  }, [loadProduct]);
+
+  const handleAddToCart = async () => {
+    if (!isAuthenticated) {
+      navigate("/login", { state: { from: { pathname: `/product/${id}` } } });
+      return;
+    }
+    setAdding(true);
+    setCartMessage(null);
+    const result = await addToCart(product.id, quantity);
+    setAdding(false);
+    setCartMessage(
+      result.success
+        ? { type: "success", text: "Added to your cart." }
+        : { type: "error", text: result.message }
+    );
+  };
+
+  if (loading) {
+    return (
+      <>
+        <Navbar />
+        <div className="flex justify-center items-center min-h-[60vh]">
+          <LoadingSpinner size={3} />
+        </div>
+        <Footer />
+      </>
+    );
+  }
+
+  if (error || !product) {
     return (
       <div>
         <Navbar />
         <div className="flex justify-center items-center h-screen">
           <div className="text-center">
-            <h1 className="text-3xl font-bold mb-4">Product Not Found</h1>
+            <h1 className="text-3xl font-bold mb-4">{error || "Product Not Found"}</h1>
             <button
               onClick={() => navigate("/products")}
               className="bg-black text-white px-6 py-2 rounded-lg"
@@ -32,16 +102,15 @@ function ProductDetails() {
     );
   }
 
-  const discount = Math.round(
-    ((product.originalPrice - product.price) / product.originalPrice) * 100
-  );
+  const discount = discountPercent(product);
+  const inStock = (product.stockQuantity ?? 0) > 0;
 
   const handleQuantityChange = (e) => {
     const value = parseInt(e.target.value);
     if (value > 0) setQuantity(value);
   };
 
-  const handleIncrement = () => setQuantity(quantity + 1);
+  const handleIncrement = () => setQuantity(Math.min(quantity + 1, product.stockQuantity || 1));
   const handleDecrement = () => {
     if (quantity > 1) setQuantity(quantity - 1);
   };
@@ -67,12 +136,9 @@ function ProductDetails() {
             <div className="flex justify-center">
               <div className="relative">
                 <img
-                  src={product.image}
+                  src={product.image || IMAGE_FALLBACK}
                   alt={product.name}
-                  onError={(e) =>
-                    (e.currentTarget.src =
-                      'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="450"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23999" font-size="20">Image Not Available</text></svg>')
-                  }
+                  onError={(e) => (e.currentTarget.src = IMAGE_FALLBACK)}
                   className="w-full h-96 md:h-96 object-cover rounded-xl shadow-lg"
                 />
                 {discount > 0 && (
@@ -80,9 +146,13 @@ function ProductDetails() {
                     -{discount}%
                   </div>
                 )}
-                {product.inStock && (
+                {inStock ? (
                   <div className="absolute bottom-4 left-4 bg-green-500 text-white px-4 py-2 rounded-full text-sm font-semibold">
                     In Stock
+                  </div>
+                ) : (
+                  <div className="absolute bottom-4 left-4 bg-red-500 text-white px-4 py-2 rounded-full text-sm font-semibold">
+                    Out of Stock
                   </div>
                 )}
               </div>
@@ -92,7 +162,7 @@ function ProductDetails() {
             <div className="flex flex-col justify-center">
               {/* Category */}
               <span className="text-yellow-600 font-semibold text-sm mb-2 uppercase">
-                {product.category}
+                {product.categoryName}
               </span>
 
               {/* Product Name */}
@@ -100,30 +170,14 @@ function ProductDetails() {
                 {product.name}
               </h1>
 
-              {/* Rating */}
-              <div className="flex items-center mb-4">
-                <div className="flex text-yellow-400">
-                  {Array(5)
-                    .fill(0)
-                    .map((_, i) => (
-                      <span key={i} className="text-lg">
-                        {i < Math.floor(product.rating) ? "★" : "☆"}
-                      </span>
-                    ))}
-                </div>
-                <span className="ml-3 text-gray-600">
-                  {product.rating} ({product.reviews} reviews)
-                </span>
-              </div>
-
               {/* Price Section */}
               <div className="flex items-center gap-4 mb-6">
                 <span className="text-3xl font-bold text-gray-900">
-                  ₹{product.price}
+                  ₹{formatPrice(effectivePrice(product))}
                 </span>
-                {product.originalPrice && (
+                {discount > 0 && (
                   <span className="text-xl text-gray-500 line-through">
-                    ₹{product.originalPrice}
+                    ₹{formatPrice(product.price)}
                   </span>
                 )}
               </div>
@@ -136,7 +190,10 @@ function ProductDetails() {
               {/* Product Details */}
               <div className="bg-gray-50 p-4 rounded-lg mb-6">
                 <h3 className="font-semibold text-gray-900 mb-2">Product Details:</h3>
-                <p className="text-gray-600 text-sm">{product.details}</p>
+                <p className="text-gray-600 text-sm">
+                  {product.brand && <>Brand: {product.brand} · </>}
+                  SKU: {product.sku} · {product.stockQuantity} in stock
+                </p>
               </div>
 
               {/* Quantity Selector */}
@@ -165,13 +222,25 @@ function ProductDetails() {
                 </div>
               </div>
 
+              {/* Cart feedback */}
+              {cartMessage && (
+                <p
+                  className={`mb-4 text-sm font-semibold ${
+                    cartMessage.type === "success" ? "text-green-600" : "text-red-600"
+                  }`}
+                >
+                  {cartMessage.text}
+                </p>
+              )}
+
               {/* Add to Cart and Wishlist Buttons */}
               <div className="flex gap-4 mb-6">
                 <button
-                  onClick={() => addToCart({ ...product, quantity })}
-                  className="flex-1 bg-black text-white py-3 rounded-lg font-semibold hover:bg-gray-900 transition"
+                  onClick={handleAddToCart}
+                  disabled={adding || !inStock}
+                  className="flex-1 bg-black text-white py-3 rounded-lg font-semibold hover:bg-gray-900 transition disabled:opacity-50"
                 >
-                  Add To Cart ({quantity})
+                  {adding ? "Adding..." : `Add To Cart (${quantity})`}
                 </button>
                 <button className="flex-1 border-2 border-black text-black py-3 rounded-lg font-semibold hover:bg-gray-50 transition">
                   ♡ Wishlist
@@ -200,32 +269,27 @@ function ProductDetails() {
         </div>
 
         {/* Related Products Section */}
-        <div className="bg-gray-50 py-12 mt-12">
-          <div className="max-w-7xl mx-auto px-4">
-            <h2 className="text-3xl font-bold mb-8">Related Products</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {products
-                .filter((p) => p.category === product.category && p.id !== product.id)
-                .slice(0, 3)
-                .map((relatedProduct) => (
+        {related.length > 0 && (
+          <div className="bg-gray-50 py-12 mt-12">
+            <div className="max-w-7xl mx-auto px-4">
+              <h2 className="text-3xl font-bold mb-8">Related Products</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {related.map((relatedProduct) => (
                   <div
                     key={relatedProduct.id}
                     onClick={() => navigate(`/product/${relatedProduct.id}`)}
                     className="bg-white rounded-xl shadow-lg overflow-hidden hover:scale-105 transition cursor-pointer"
                   >
                     <img
-                      src={relatedProduct.image}
+                      src={relatedProduct.image || IMAGE_FALLBACK}
                       alt={relatedProduct.name}
-                      onError={(e) =>
-                        (e.currentTarget.src =
-                          'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23999" font-size="18">Image Not Available</text></svg>')
-                      }
+                      onError={(e) => (e.currentTarget.src = IMAGE_FALLBACK)}
                       className="w-full h-64 object-cover"
                     />
                     <div className="p-4">
                       <h3 className="font-semibold text-lg">{relatedProduct.name}</h3>
                       <p className="text-yellow-600 font-bold mt-2">
-                        ₹{relatedProduct.price}
+                        ₹{formatPrice(effectivePrice(relatedProduct))}
                       </p>
                       <button className="w-full mt-4 bg-black text-white py-2 rounded-lg">
                         View Details
@@ -233,9 +297,10 @@ function ProductDetails() {
                     </div>
                   </div>
                 ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
       <Footer />
     </>

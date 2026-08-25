@@ -1,14 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import LoadingSpinner from "../components/LoadingSpinner";
 import useCartStore from "../store/cartStore";
+import useAuthStore from "../store/authStore";
+import { placeOrder } from "../services/orderService";
+import { getErrorMessage } from "../services/axiosConfig";
+import { formatPrice, shippingFor } from "../utils/format";
 import { FaArrowLeft, FaLock, FaMoneyBillWave, FaCreditCard, FaShoppingBag } from "react-icons/fa";
 import InputField from "../components/InputField";
 
 function Checkout() {
   const navigate = useNavigate();
-  const { cart, clearCart } = useCartStore();
+  const { items, cartTotal, totalItemCount, loading, fetchCart, reset } = useCartStore();
+  const user = useAuthStore((state) => state.user);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -24,11 +30,26 @@ function Checkout() {
 
   const [errors, setErrors] = useState({});
   const [isProcessing, setIsProcessing] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
 
-  // Order calculations
-  const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const shipping = subtotal >= 500 ? 0 : 50;
+  useEffect(() => {
+    fetchCart();
+  }, [fetchCart]);
+
+  // Prefill the contact fields from the logged-in account
+  useEffect(() => {
+    if (!user) return;
+    setFormData((prev) => ({
+      ...prev,
+      fullName: prev.fullName || user.fullName || "",
+      mobile: prev.mobile || user.mobile || "",
+      email: prev.email || user.email || "",
+    }));
+  }, [user]);
+
+  // Order calculations (the backend recalculates authoritative totals)
+  const subtotal = Number(cartTotal || 0);
+  const shipping = shippingFor(subtotal);
   const grandTotal = subtotal + shipping;
 
   // Handle input changes
@@ -41,8 +62,20 @@ function Checkout() {
     }
   };
 
+  if (loading && items.length === 0) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <LoadingSpinner size={3} />
+        </div>
+        <Footer />
+      </>
+    );
+  }
+
   // If cart is empty, render empty checkout state (hooks must be declared above)
-  if (cart.length === 0) {
+  if (items.length === 0) {
     return (
       <>
         <Navbar />
@@ -81,7 +114,7 @@ function Checkout() {
   };
 
   // Handle place order
-  const handlePlaceOrder = (e) => {
+  const handlePlaceOrder = async (e) => {
     e.preventDefault();
     const validationErrors = validate();
     if (Object.keys(validationErrors).length > 0) {
@@ -90,34 +123,27 @@ function Checkout() {
     }
 
     setIsProcessing(true);
+    setSubmitError(null);
 
-    // Simulate order processing
-    setTimeout(() => {
-      // Generate unique order number
-      const orderNumber = `SHC${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100)}`;
+    try {
+      const order = await placeOrder({
+        shippingAddress: formData.address.trim(),
+        city: formData.city.trim(),
+        state: formData.state.trim(),
+        pincode: formData.pincode.trim(),
+        paymentMethod: formData.paymentMethod === "online" ? "ONLINE" : "COD",
+      });
 
-      // Store order details in sessionStorage for the success page
-      const orderDetails = {
-        orderNumber,
-        items: [...cart],
-        totalQuantity,
-        grandTotal,
-        shipping,
-        customer: { ...formData },
-        date: new Date().toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        }),
-      };
-      sessionStorage.setItem("lastOrder", JSON.stringify(orderDetails));
-
-      // Clear the cart
-      clearCart();
-
-      // Navigate to success page
-      navigate("/order-success");
-    }, 1500);
+      // The backend clears the cart as part of order creation
+      reset();
+      sessionStorage.setItem("lastOrderId", String(order.id));
+      navigate("/order-success", { state: { order } });
+    } catch (error) {
+      setSubmitError(getErrorMessage(error, "We could not place your order. Please try again."));
+      fetchCart();
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Uses shared InputField component
@@ -261,17 +287,17 @@ function Checkout() {
 
                   {/* Cart Items Preview */}
                   <div className="space-y-3 max-h-52 overflow-y-auto mb-5 pr-1">
-                    {cart.map((item) => (
+                    {items.map((item) => (
                       <div key={item.id} className="flex items-center gap-3">
                         <div className="w-14 h-14 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                          <img src={item.productImage} alt={item.productName} className="w-full h-full object-cover" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
+                          <p className="text-sm font-semibold text-gray-900 truncate">{item.productName}</p>
                           <p className="text-xs text-gray-500">Qty: {item.quantity}</p>
                         </div>
                         <p className="text-sm font-bold text-gray-900 flex-shrink-0">
-                          ₹{(item.price * item.quantity).toLocaleString("en-IN")}
+                          ₹{formatPrice(item.itemSubtotal)}
                         </p>
                       </div>
                     ))}
@@ -284,15 +310,15 @@ function Checkout() {
                   <div className="space-y-2 text-gray-600 text-sm">
                     <div className="flex justify-between">
                       <span>Product Count</span>
-                      <span className="font-semibold text-gray-900">{cart.length} items</span>
+                      <span className="font-semibold text-gray-900">{items.length} items</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Total Quantity</span>
-                      <span className="font-semibold text-gray-900">{totalQuantity}</span>
+                      <span className="font-semibold text-gray-900">{totalItemCount}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Subtotal</span>
-                      <span className="font-semibold text-gray-900">₹{subtotal.toLocaleString("en-IN")}</span>
+                      <span className="font-semibold text-gray-900">₹{formatPrice(subtotal)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Shipping</span>
@@ -306,10 +332,14 @@ function Checkout() {
                     <div className="flex justify-between items-center">
                       <span className="text-base font-bold text-gray-900">Grand Total</span>
                       <span className="text-2xl font-extrabold text-yellow-600">
-                        ₹{grandTotal.toLocaleString("en-IN")}
+                        ₹{formatPrice(grandTotal)}
                       </span>
                     </div>
                   </div>
+
+                  {submitError && (
+                    <p className="mt-4 text-sm font-semibold text-red-600">{submitError}</p>
+                  )}
 
                   {/* Place Order Button */}
                   <button

@@ -1,84 +1,149 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import PageHeader from "../components/PageHeader";
-import products from "../data/products";
-import { FaSearch, FaTh, FaList, FaFilter, FaTimes, FaStar, FaChevronDown } from "react-icons/fa";
+import LoadingSpinner from "../components/LoadingSpinner";
+import { FaSearch, FaTh, FaList, FaFilter, FaTimes, FaChevronDown } from "react-icons/fa";
 import FilterSidebar from "../components/FilterSidebar";
+import { fetchProducts } from "../services/productService";
+import { fetchCategories } from "../services/categoryService";
+import { getErrorMessage } from "../services/axiosConfig";
+import { discountPercent, effectivePrice, formatPrice } from "../utils/format";
+
+const PAGE_SIZE = 12;
+const MAX_PRICE = 5000;
+const ALL = "all";
+
+// UI sort value -> backend sort parameter
+const SORT_PARAMS = {
+  default: undefined,
+  "price-low": "price_asc",
+  "price-high": "price_desc",
+  "name-asc": "name_asc",
+  newest: "createdAt",
+};
+
+function ProductImage({ product, className }) {
+  return (
+    <img
+      src={product.image || "/images/products/shirt.jpg"}
+      alt={product.name}
+      onError={(e) => {
+        e.currentTarget.src =
+          'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23999" font-size="18">Image Not Available</text></svg>';
+      }}
+      className={className}
+    />
+  );
+}
 
 function Products() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // Filter / sort state
-  const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [priceRange, setPriceRange] = useState([0, 5000]);
+  const [searchInput, setSearchInput] = useState(searchParams.get("search") || "");
+  const [search, setSearch] = useState(searchParams.get("search") || "");
+  const [selectedCategory, setSelectedCategory] = useState(
+    searchParams.get("category") ? Number(searchParams.get("category")) : ALL
+  );
+  const [priceRange, setPriceRange] = useState([0, MAX_PRICE]);
   const [sortBy, setSortBy] = useState("default");
   const [viewMode, setViewMode] = useState("grid"); // grid | list
   const [showFilters, setShowFilters] = useState(false); // mobile toggle
+  const [page, setPage] = useState(0);
 
-  const categories = ["All", "Men", "Women", "Kids", "Footwear", "Accessories"];
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [totalElements, setTotalElements] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Filtered + sorted products
-  const filteredProducts = useMemo(() => {
-    let result = [...products];
+  // Debounce the search box so we do not hit the API on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(0);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
-    // Search
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q) ||
-          p.description.toLowerCase().includes(q)
-      );
+  useEffect(() => {
+    let active = true;
+    fetchCategories()
+      .then((data) => {
+        if (active) setCategories(data || []);
+      })
+      .catch(() => {
+        if (active) setCategories([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const loadProducts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchProducts({
+        search: search || undefined,
+        category: selectedCategory === ALL ? undefined : selectedCategory,
+        minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
+        maxPrice: priceRange[1] < MAX_PRICE ? priceRange[1] : undefined,
+        sort: SORT_PARAMS[sortBy],
+        page,
+        size: PAGE_SIZE,
+      });
+      setProducts(data?.content || []);
+      setTotalElements(data?.totalElements || 0);
+      setTotalPages(data?.totalPages || 0);
+    } catch (err) {
+      setError(getErrorMessage(err, "Unable to load products."));
+      setProducts([]);
+      setTotalElements(0);
+      setTotalPages(0);
+    } finally {
+      setLoading(false);
     }
+  }, [search, selectedCategory, priceRange, sortBy, page]);
 
-    // Category
-    if (selectedCategory !== "All") {
-      result = result.filter((p) => p.category === selectedCategory);
-    }
-
-    // Price range
-    result = result.filter((p) => p.price >= priceRange[0] && p.price <= priceRange[1]);
-
-    // Sort
-    switch (sortBy) {
-      case "price-low":
-        result.sort((a, b) => a.price - b.price);
-        break;
-      case "price-high":
-        result.sort((a, b) => b.price - a.price);
-        break;
-      case "popularity":
-        result.sort((a, b) => b.popularity - a.popularity);
-        break;
-      case "rating":
-        result.sort((a, b) => b.rating - a.rating);
-        break;
-      case "newest":
-        result.sort((a, b) => (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0));
-        break;
-      default:
-        break;
-    }
-
-    return result;
-  }, [search, selectedCategory, priceRange, sortBy]);
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
 
   const activeFiltersCount =
-    (selectedCategory !== "All" ? 1 : 0) +
-    (priceRange[0] !== 0 || priceRange[1] !== 5000 ? 1 : 0);
+    (selectedCategory !== ALL ? 1 : 0) +
+    (priceRange[0] !== 0 || priceRange[1] !== MAX_PRICE ? 1 : 0);
 
   const clearFilters = () => {
+    setSearchInput("");
     setSearch("");
-    setSelectedCategory("All");
-    setPriceRange([0, 5000]);
+    setSelectedCategory(ALL);
+    setPriceRange([0, MAX_PRICE]);
     setSortBy("default");
+    setPage(0);
   };
 
-  /* FilterSidebar moved to components/FilterSidebar for lint stability */
+  const categoryOptions = [{ id: ALL, name: "All" }, ...categories];
+
+  const filterProps = {
+    categories: categoryOptions,
+    selectedCategory,
+    setSelectedCategory: (id) => {
+      setSelectedCategory(id);
+      setPage(0);
+    },
+    priceRange,
+    setPriceRange: (range) => {
+      setPriceRange(range);
+      setPage(0);
+    },
+    clearFilters,
+    activeFiltersCount,
+  };
 
   return (
     <>
@@ -98,8 +163,8 @@ function Products() {
               <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
               <input
                 type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Search products..."
                 className="w-full pl-10 pr-4 py-3 rounded-full border border-gray-200 bg-white focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-100 transition-all text-sm"
               />
@@ -110,14 +175,16 @@ function Products() {
               <div className="relative">
                 <select
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
+                  onChange={(e) => {
+                    setSortBy(e.target.value);
+                    setPage(0);
+                  }}
                   className="appearance-none bg-white border border-gray-200 rounded-full px-4 py-2.5 pr-10 text-sm text-gray-700 focus:border-yellow-500 focus:outline-none cursor-pointer"
                 >
                   <option value="default">Sort By</option>
                   <option value="price-low">Price: Low to High</option>
                   <option value="price-high">Price: High to Low</option>
-                  <option value="popularity">Popularity</option>
-                  <option value="rating">Rating</option>
+                  <option value="name-asc">Name: A to Z</option>
                   <option value="newest">Newest First</option>
                 </select>
                 <FaChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none" />
@@ -163,16 +230,7 @@ function Products() {
                   <FaFilter className="text-yellow-500 text-sm" />
                   Filters
                 </h2>
-                <FilterSidebar
-                  categories={categories}
-                  selectedCategory={selectedCategory}
-                  setSelectedCategory={setSelectedCategory}
-                  priceRange={priceRange}
-                  setPriceRange={setPriceRange}
-                  clearFilters={clearFilters}
-                  activeFiltersCount={activeFiltersCount}
-                  products={products}
-                />
+                <FilterSidebar {...filterProps} />
               </div>
             </aside>
 
@@ -187,16 +245,7 @@ function Products() {
                       <FaTimes />
                     </button>
                   </div>
-                  <FilterSidebar
-                    categories={categories}
-                    selectedCategory={selectedCategory}
-                    setSelectedCategory={setSelectedCategory}
-                    priceRange={priceRange}
-                    setPriceRange={setPriceRange}
-                    clearFilters={clearFilters}
-                    activeFiltersCount={activeFiltersCount}
-                    products={products}
-                  />
+                  <FilterSidebar {...filterProps} />
                 </div>
               </div>
             )}
@@ -205,10 +254,22 @@ function Products() {
             <div className="flex-1">
               {/* Results count */}
               <p className="text-sm text-gray-500 mb-4">
-                Showing <strong className="text-gray-900">{filteredProducts.length}</strong> product{filteredProducts.length !== 1 && "s"}
+                Showing <strong className="text-gray-900">{products.length}</strong> of{" "}
+                <strong className="text-gray-900">{totalElements}</strong> product{totalElements !== 1 && "s"}
               </p>
 
-              {filteredProducts.length === 0 ? (
+              {loading ? (
+                <div className="py-20">
+                  <LoadingSpinner size={3} />
+                </div>
+              ) : error ? (
+                <div className="text-center py-20">
+                  <p className="text-lg text-red-600 mb-4">{error}</p>
+                  <button onClick={loadProducts} className="text-yellow-600 font-semibold hover:text-yellow-700 transition">
+                    Try Again
+                  </button>
+                </div>
+              ) : products.length === 0 ? (
                 <div className="text-center py-20">
                   <p className="text-xl text-gray-500 mb-4">No products found</p>
                   <button onClick={clearFilters} className="text-yellow-600 font-semibold hover:text-yellow-700 transition">
@@ -218,10 +279,8 @@ function Products() {
               ) : viewMode === "grid" ? (
                 /* Grid View */
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-                  {filteredProducts.map((product) => {
-                    const discount = product.originalPrice
-                      ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
-                      : 0;
+                  {products.map((product) => {
+                    const discount = discountPercent(product);
 
                     return (
                       <div
@@ -230,29 +289,26 @@ function Products() {
                         className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer group"
                       >
                         <div className="relative overflow-hidden">
-                          <img src={product.image} alt={product.name} className="w-full h-60 object-cover group-hover:scale-105 transition-transform duration-500" />
+                          <ProductImage product={product} className="w-full h-60 object-cover group-hover:scale-105 transition-transform duration-500" />
                           {discount > 0 && (
                             <span className="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">-{discount}%</span>
                           )}
-                          {product.isNew && (
-                            <span className="absolute top-3 left-3 bg-yellow-500 text-black text-xs font-bold px-2.5 py-1 rounded-full">NEW</span>
+                          {product.featured && (
+                            <span className="absolute top-3 left-3 bg-yellow-500 text-black text-xs font-bold px-2.5 py-1 rounded-full">FEATURED</span>
                           )}
                         </div>
                         <div className="p-4">
-                          <span className="text-xs text-gray-500 uppercase tracking-wider">{product.category}</span>
+                          <span className="text-xs text-gray-500 uppercase tracking-wider">{product.categoryName}</span>
                           <h3 className="font-semibold text-gray-900 mt-1 truncate">{product.name}</h3>
-                          <div className="flex items-center gap-1 mt-1 text-yellow-400">
-                            {Array(5).fill(0).map((_, i) => (
-                              <FaStar key={i} className={`text-xs ${i < Math.floor(product.rating) ? "" : "text-gray-300"}`} />
-                            ))}
-                            <span className="text-xs text-gray-500 ml-1">({product.reviews})</span>
-                          </div>
                           <div className="flex items-center gap-2 mt-2">
-                            <span className="text-lg font-bold text-gray-900">₹{product.price}</span>
-                            {product.originalPrice && (
-                              <span className="text-sm text-gray-400 line-through">₹{product.originalPrice}</span>
+                            <span className="text-lg font-bold text-gray-900">₹{formatPrice(effectivePrice(product))}</span>
+                            {discount > 0 && (
+                              <span className="text-sm text-gray-400 line-through">₹{formatPrice(product.price)}</span>
                             )}
                           </div>
+                          {product.stockQuantity === 0 && (
+                            <p className="text-xs text-red-500 font-semibold mt-1">Out of stock</p>
+                          )}
                         </div>
                       </div>
                     );
@@ -261,24 +317,57 @@ function Products() {
               ) : (
                 /* List View */
                 <div className="space-y-4">
-                  {filteredProducts.map((product) => (
+                  {products.map((product) => (
                     <div
                       key={product.id}
                       onClick={() => navigate(`/product/${product.id}`)}
                       className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex gap-5 hover:shadow-md transition-all cursor-pointer"
                     >
-                      <img src={product.image} alt={product.name} className="w-28 h-28 rounded-xl object-cover flex-shrink-0" />
+                      <ProductImage product={product} className="w-28 h-28 rounded-xl object-cover flex-shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <span className="text-xs text-gray-500 uppercase">{product.category}</span>
+                        <span className="text-xs text-gray-500 uppercase">{product.categoryName}</span>
                         <h3 className="font-semibold text-gray-900">{product.name}</h3>
                         <p className="text-sm text-gray-500 mt-1 line-clamp-2">{product.description}</p>
                         <div className="flex items-center gap-2 mt-2">
-                          <span className="text-lg font-bold text-gray-900">₹{product.price}</span>
-                          {product.originalPrice && <span className="text-sm text-gray-400 line-through">₹{product.originalPrice}</span>}
+                          <span className="text-lg font-bold text-gray-900">₹{formatPrice(effectivePrice(product))}</span>
+                          {discountPercent(product) > 0 && (
+                            <span className="text-sm text-gray-400 line-through">₹{formatPrice(product.price)}</span>
+                          )}
                         </div>
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* ─── Pagination ─── */}
+              {!loading && !error && totalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 mt-10">
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="px-4 py-2 rounded-full border border-gray-200 bg-white text-sm text-gray-700 disabled:opacity-40 hover:border-yellow-500 transition"
+                  >
+                    Previous
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => i).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setPage(p)}
+                      className={`w-9 h-9 rounded-full text-sm font-semibold transition ${
+                        p === page ? "bg-black text-yellow-400" : "bg-white border border-gray-200 text-gray-700 hover:border-yellow-500"
+                      }`}
+                    >
+                      {p + 1}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                    className="px-4 py-2 rounded-full border border-gray-200 bg-white text-sm text-gray-700 disabled:opacity-40 hover:border-yellow-500 transition"
+                  >
+                    Next
+                  </button>
                 </div>
               )}
             </div>

@@ -1,18 +1,58 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import LoadingSpinner from "../components/LoadingSpinner";
 import useCartStore from "../store/cartStore";
+import { formatPrice, shippingFor, FREE_SHIPPING_THRESHOLD } from "../utils/format";
 import { FaShoppingBag, FaTrash, FaMinus, FaPlus, FaArrowLeft } from "react-icons/fa";
 
 function Cart() {
-  const { cart, removeFromCart, increaseQuantity, decreaseQuantity } = useCartStore();
+  const { items, cartTotal, totalItemCount, loading, error, updatingItemId, fetchCart, updateQuantity, removeItem } =
+    useCartStore();
 
-  // Calculate grand total
-  const grandTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+  useEffect(() => {
+    fetchCart();
+  }, [fetchCart]);
+
+  const shipping = shippingFor(cartTotal);
+
+  /* ─── Loading State ─── */
+  if (loading && items.length === 0) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <LoadingSpinner size={3} />
+        </div>
+        <Footer />
+      </>
+    );
+  }
+
+  /* ─── Error State ─── */
+  if (error && items.length === 0) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-[60vh] flex items-center justify-center text-center px-6">
+          <div>
+            <p className="text-lg text-red-600 mb-4">{error}</p>
+            <button
+              onClick={fetchCart}
+              className="bg-black text-yellow-400 px-6 py-3 rounded-full font-semibold hover:bg-gray-900 transition"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+        <Footer />
+      </>
+    );
+  }
 
   /* ─── Empty Cart State ─── */
-  if (cart.length === 0) {
+  if (items.length === 0) {
     return (
       <>
         <Navbar />
@@ -58,26 +98,32 @@ function Cart() {
             <h1 className="text-4xl font-bold text-gray-900">
               Shopping <span className="text-yellow-500">Cart</span>
             </h1>
-            <p className="text-gray-500 mt-1">{totalItems} item{totalItems !== 1 && "s"} in your cart</p>
+            <p className="text-gray-500 mt-1">{totalItemCount} item{totalItemCount !== 1 && "s"} in your cart</p>
           </div>
+
+          {error && (
+            <p className="mb-6 text-sm font-semibold text-red-600">{error}</p>
+          )}
 
           {/* Cart Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
             {/* ─── Cart Items List ─── */}
             <div className="lg:col-span-2 space-y-4">
-              {cart.map((item) => (
+              {items.map((item) => (
                 <div
                   key={item.id}
-                  className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6 hover:shadow-md transition-shadow duration-300"
+                  className={`bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6 hover:shadow-md transition-shadow duration-300 ${
+                    updatingItemId === item.id ? "opacity-60" : ""
+                  }`}
                 >
                   <div className="flex flex-col sm:flex-row gap-5">
 
                     {/* Product Image */}
                     <div className="w-full sm:w-32 h-40 sm:h-32 flex-shrink-0 rounded-xl overflow-hidden bg-gray-100">
                       <img
-                        src={item.image}
-                        alt={item.name}
+                        src={item.productImage}
+                        alt={item.productName}
                         className="w-full h-full object-cover"
                       />
                     </div>
@@ -86,19 +132,23 @@ function Cart() {
                     <div className="flex-1 flex flex-col justify-between">
                       <div className="flex justify-between items-start gap-2">
                         <div>
-                          <span className="text-xs font-semibold text-yellow-600 uppercase tracking-wider">
-                            {item.category}
-                          </span>
-                          <h3 className="text-lg font-bold text-gray-900 mt-0.5">{item.name}</h3>
+                          <Link
+                            to={`/product/${item.productId}`}
+                            className="text-xs font-semibold text-yellow-600 uppercase tracking-wider hover:underline"
+                          >
+                            View product
+                          </Link>
+                          <h3 className="text-lg font-bold text-gray-900 mt-0.5">{item.productName}</h3>
                           <p className="text-sm text-gray-500 mt-0.5">
-                            ₹{item.price} × {item.quantity}
+                            ₹{formatPrice(item.effectivePrice)} × {item.quantity}
                           </p>
                         </div>
 
                         {/* Remove Button */}
                         <button
-                          onClick={() => removeFromCart(item.id)}
-                          className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50"
+                          onClick={() => removeItem(item.id)}
+                          disabled={updatingItemId === item.id}
+                          className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50 disabled:opacity-40"
                           title="Remove Item"
                         >
                           <FaTrash className="text-sm" />
@@ -110,8 +160,8 @@ function Cart() {
                         {/* Quantity Controls */}
                         <div className="flex items-center border border-gray-200 rounded-full overflow-hidden bg-gray-50">
                           <button
-                            onClick={() => decreaseQuantity(item.id)}
-                            disabled={item.quantity <= 1}
+                            onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                            disabled={item.quantity <= 1 || updatingItemId === item.id}
                             className="px-3 py-2 text-gray-600 hover:bg-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <FaMinus className="text-xs" />
@@ -120,8 +170,9 @@ function Cart() {
                             {item.quantity}
                           </span>
                           <button
-                            onClick={() => increaseQuantity(item.id)}
-                            className="px-3 py-2 text-gray-600 hover:bg-gray-200 transition"
+                            onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                            disabled={updatingItemId === item.id || item.quantity >= (item.stockQuantity ?? Infinity)}
+                            className="px-3 py-2 text-gray-600 hover:bg-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <FaPlus className="text-xs" />
                           </button>
@@ -129,7 +180,7 @@ function Cart() {
 
                         {/* Subtotal */}
                         <p className="text-xl font-bold text-gray-900">
-                          ₹{(item.price * item.quantity).toLocaleString("en-IN")}
+                          ₹{formatPrice(item.itemSubtotal)}
                         </p>
                       </div>
                     </div>
@@ -149,17 +200,17 @@ function Cart() {
                 {/* Price Breakdown */}
                 <div className="space-y-3 text-gray-600">
                   <div className="flex justify-between">
-                    <span>Subtotal ({totalItems} items)</span>
-                    <span className="font-semibold text-gray-900">₹{grandTotal.toLocaleString("en-IN")}</span>
+                    <span>Subtotal ({totalItemCount} items)</span>
+                    <span className="font-semibold text-gray-900">₹{formatPrice(cartTotal)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Shipping</span>
                     <span className="font-semibold text-green-600">
-                      {grandTotal >= 500 ? "FREE" : "₹50"}
+                      {shipping === 0 ? "FREE" : `₹${shipping}`}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm text-gray-500">
-                    <span>Free shipping on orders above ₹500</span>
+                    <span>Free shipping on orders above ₹{FREE_SHIPPING_THRESHOLD}</span>
                   </div>
 
                   {/* Divider */}
@@ -169,7 +220,7 @@ function Cart() {
                   <div className="flex justify-between items-center">
                     <span className="text-lg font-bold text-gray-900">Grand Total</span>
                     <span className="text-2xl font-extrabold text-yellow-600">
-                      ₹{(grandTotal + (grandTotal >= 500 ? 0 : 50)).toLocaleString("en-IN")}
+                      ₹{formatPrice(Number(cartTotal) + shipping)}
                     </span>
                   </div>
                 </div>

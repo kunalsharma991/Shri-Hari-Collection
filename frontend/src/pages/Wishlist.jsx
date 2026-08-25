@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
@@ -10,10 +11,12 @@ import { FaHeart, FaShoppingCart, FaTrash, FaEye } from "react-icons/fa";
 function Wishlist() {
   const { wishlist, removeItem } = useWishlistStore();
   const addToCart = useCartStore((state) => state.addToCart);
+  const [moveError, setMoveError] = useState(null);
 
-  const handleMoveToCart = (product) => {
-    addToCart({ ...product, quantity: 1 });
-    removeItem(product.id);
+  const handleMoveToCart = async (product) => {
+    const result = await addToCart(product.id, 1);
+    if (result.success) removeItem(product.id);
+    else setMoveError(result.message);
   };
 
   return (
@@ -27,6 +30,7 @@ function Wishlist() {
 
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+          {moveError && <p className="mb-6 text-sm font-semibold text-red-600">{moveError}</p>}
           {wishlist.length === 0 ? (
             <EmptyState
               icon={FaHeart}

@@ -5,6 +5,10 @@ function StatusBadge({ status }) {
       label: "Pending",
       classes: "bg-yellow-100 text-yellow-700 border-yellow-200",
     },
+    confirmed: {
+      label: "Confirmed",
+      classes: "bg-teal-100 text-teal-700 border-teal-200",
+    },
     processing: {
       label: "Processing",
       classes: "bg-blue-100 text-blue-700 border-blue-200",
@@ -23,7 +27,7 @@ function StatusBadge({ status }) {
     },
   };
 
-  const { label, classes } = config[status] || config.pending;
+  const { label, classes } = config[String(status || "").toLowerCase()] || config.pending;
 
   return (
     <span

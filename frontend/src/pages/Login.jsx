@@ -11,7 +11,7 @@ function Login() {
   const login = useAuthStore((state) => state.login);
 
   const [formData, setFormData] = useState({
-    identifier: "",
+    email: "",
     password: "",
     rememberMe: false,
   });
@@ -31,24 +31,22 @@ function Login() {
     if (error) setError("");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.identifier.trim() || !formData.password.trim()) {
+    if (!formData.email.trim() || !formData.password.trim()) {
       setError("Please fill in all fields.");
       return;
     }
 
     setLoading(true);
-    setTimeout(() => {
-      const result = login(formData.identifier, formData.password, formData.rememberMe);
-      setLoading(false);
+    const result = await login(formData.email.trim(), formData.password, formData.rememberMe);
+    setLoading(false);
 
-      if (result.success) {
-        navigate(redirectPath, { replace: true });
-      } else {
-        setError(result.message);
-      }
-    }, 800);
+    if (result.success) {
+      navigate(redirectPath, { replace: true });
+    } else {
+      setError(result.message);
+    }
   };
 
   return (
@@ -76,21 +74,21 @@ function Login() {
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Email / Mobile */}
+              {/* Email */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  Email or Mobile Number
+                  Email Address
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
                     <FaEnvelope className="text-sm" />
                   </span>
                   <input
-                    type="text"
-                    name="identifier"
-                    value={formData.identifier}
+                    type="email"
+                    name="email"
+                    value={formData.email}
                     onChange={handleChange}
-                    placeholder="Enter email or mobile number"
+                    placeholder="Enter your email address"
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:border-yellow-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-100 transition-all"
                   />
                 </div>
@@ -179,17 +177,6 @@ function Login() {
             </p>
 
             {/* Admin access is handled via separate admin portal — no link here */}
-
-            {/* Demo Credentials */}
-            <div className="mt-5 p-4 bg-gray-50 rounded-xl text-sm">
-              <p className="font-semibold text-gray-700 mb-2">Demo Credentials:</p>
-              <p className="text-gray-500">
-                Customer: <span className="font-mono text-gray-700">demo@example.com</span> / <span className="font-mono text-gray-700">demo123</span>
-              </p>
-              <p className="text-gray-500">
-                Admin: <span className="font-mono text-gray-700">admin@shrihari.com</span> / <span className="font-mono text-gray-700">admin123</span>
-              </p>
-            </div>
           </div>
         </div>
       </div>

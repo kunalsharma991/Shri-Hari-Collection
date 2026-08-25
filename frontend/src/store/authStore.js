@@ -1,185 +1,129 @@
 import { create } from "zustand";
+import * as authService from "../services/authService";
+import { getErrorMessage } from "../services/axiosConfig";
+import {
+  clearSession,
+  getAccessToken,
+  getRefreshToken,
+  getStoredUser,
+  saveSession,
+  saveUser,
+} from "../services/tokenStorage";
+
+// Backend roles are enum values ("USER" / "ADMIN"); the UI works with lowercase.
+function normalizeRole(role) {
+  return role ? String(role).toLowerCase() : null;
+}
 
 const useAuthStore = create((set, get) => ({
   user: null,
   isAuthenticated: false,
   role: null, // "user" | "admin"
+  loading: false,
 
-  // Login with email/mobile + password
-  login: (identifier, password, rememberMe = false) => {
-    // Mock authentication logic
-    const users = JSON.parse(localStorage.getItem("shc_users") || "null") || [
-      {
-        id: 1,
-        fullName: "Admin User",
-        email: "admin@shrihari.com",
-        mobile: "8859000084",
-        password: "admin123",
-        role: "admin",
-      },
-      {
-        id: 2,
-        fullName: "Demo Customer",
-        email: "demo@example.com",
-        mobile: "9999999999",
-        password: "demo123",
-        role: "user",
-      },
-    ];
-
-    const found = users.find(
-      (u) =>
-        (u.email === identifier || u.mobile === identifier) &&
-        u.password === password
-    );
-
-    if (found) {
-      const userObj = {
-        id: found.id,
-        fullName: found.fullName,
-        email: found.email,
-        mobile: found.mobile,
-        role: found.role,
+  // Login with email + password against the backend
+  login: async (email, password, rememberMe = false) => {
+    set({ loading: true });
+    try {
+      const data = await authService.login(email, password);
+      const user = { ...data.user, role: normalizeRole(data.user?.role) };
+      saveSession(
+        { accessToken: data.accessToken, refreshToken: data.refreshToken, user },
+        rememberMe
+      );
+      set({ user, isAuthenticated: true, role: user.role, loading: false });
+      return { success: true, user };
+    } catch (error) {
+      set({ loading: false });
+      const status = error?.response?.status;
+      return {
+        success: false,
+        message:
+          status === 401 || status === 403
+            ? "Invalid credentials. Please try again."
+            : getErrorMessage(error),
       };
-
-      if (rememberMe) {
-        localStorage.setItem("shc_auth", JSON.stringify(userObj));
-      } else {
-        sessionStorage.setItem("shc_auth", JSON.stringify(userObj));
-      }
-
-      set({ user: userObj, isAuthenticated: true, role: found.role });
-      return { success: true };
     }
-    return { success: false, message: "Invalid credentials. Please try again." };
   },
 
-  // Register new user
-  register: (userData) => {
-    const users = JSON.parse(localStorage.getItem("shc_users") || "null") || [
-      {
-        id: 1,
-        fullName: "Admin User",
-        email: "admin@shrihari.com",
-        mobile: "8859000084",
-        password: "admin123",
-        role: "admin",
-      },
-      {
-        id: 2,
-        fullName: "Demo Customer",
-        email: "demo@example.com",
-        mobile: "9999999999",
-        password: "demo123",
-        role: "user",
-      },
-    ];
-
-    // Check if email or mobile already exists
-    const exists = users.find(
-      (u) => u.email === userData.email || u.mobile === userData.mobile
-    );
-    if (exists) {
-      return { success: false, message: "Email or mobile number already registered." };
+  // Register a new user, then log them in so the session has a JWT
+  register: async (userData) => {
+    set({ loading: true });
+    try {
+      await authService.register({
+        fullName: userData.fullName,
+        email: userData.email,
+        mobile: userData.mobile,
+        password: userData.password,
+        confirmPassword: userData.confirmPassword ?? userData.password,
+      });
+      set({ loading: false });
+      return await get().login(userData.email, userData.password, false);
+    } catch (error) {
+      set({ loading: false });
+      return { success: false, message: getErrorMessage(error, "Registration failed.") };
     }
-
-    const newUser = {
-      id: Date.now(),
-      fullName: userData.fullName,
-      email: userData.email,
-      mobile: userData.mobile,
-      password: userData.password,
-      role: "user",
-    };
-
-    users.push(newUser);
-    localStorage.setItem("shc_users", JSON.stringify(users));
-
-    // Auto-login after registration
-    const userObj = {
-      id: newUser.id,
-      fullName: newUser.fullName,
-      email: newUser.email,
-      mobile: newUser.mobile,
-      role: "user",
-    };
-    sessionStorage.setItem("shc_auth", JSON.stringify(userObj));
-    set({ user: userObj, isAuthenticated: true, role: "user" });
-
-    return { success: true };
   },
 
-  // Logout
-  logout: () => {
-    localStorage.removeItem("shc_auth");
-    sessionStorage.removeItem("shc_auth");
+  logout: async () => {
+    const refreshToken = getRefreshToken();
+    clearSession();
     set({ user: null, isAuthenticated: false, role: null });
+    if (refreshToken) {
+      try {
+        await authService.logout(refreshToken);
+      } catch {
+        // Session is already cleared locally; ignore revoke failures.
+      }
+    }
   },
 
-  // Update user profile
+  // Local-only profile edit: the backend has no profile update endpoint yet
   updateProfile: (updates) => {
     const { user } = get();
-    if (!user) return;
-    const updatedUser = { ...user, ...updates };
-
-    // Update in storage
-    const users = JSON.parse(localStorage.getItem("shc_users") || "[]");
-    const idx = users.findIndex((u) => u.id === user.id);
-    if (idx !== -1) {
-      users[idx] = { ...users[idx], ...updates };
-      localStorage.setItem("shc_users", JSON.stringify(users));
-    }
-
-    localStorage.setItem("shc_auth", JSON.stringify(updatedUser));
-    sessionStorage.setItem("shc_auth", JSON.stringify(updatedUser));
-    set({ user: updatedUser });
-  },
-
-  // Change password
-  changePassword: (oldPassword, newPassword) => {
-    const { user } = get();
     if (!user) return { success: false, message: "Not logged in." };
+    const updatedUser = { ...user, ...updates };
+    saveUser(updatedUser);
+    set({ user: updatedUser });
+    return {
+      success: true,
+      message: "Profile updated locally. Server-side profile update is not available yet.",
+    };
+  },
 
-    const users = JSON.parse(localStorage.getItem("shc_users") || "[]");
-    const found = users.find((u) => u.id === user.id);
-    if (!found || found.password !== oldPassword) {
-      return { success: false, message: "Current password is incorrect." };
+  changePassword: () => ({
+    success: false,
+    message: "Password change is not supported by the backend yet.",
+  }),
+
+  forgotPassword: () => ({
+    success: false,
+    message: "Password reset is not supported by the backend yet.",
+  }),
+
+  resetPassword: () => ({
+    success: false,
+    message: "Password reset is not supported by the backend yet.",
+  }),
+
+  // Restore session from storage on app load and revalidate against /auth/me
+  restoreSession: async () => {
+    if (!getAccessToken()) return;
+    const stored = getStoredUser();
+    if (stored) {
+      set({ user: stored, isAuthenticated: true, role: normalizeRole(stored.role) });
     }
-
-    found.password = newPassword;
-    localStorage.setItem("shc_users", JSON.stringify(users));
-    return { success: true };
-  },
-
-  // Forgot password (mock)
-  forgotPassword: (email) => {
-    const users = JSON.parse(localStorage.getItem("shc_users") || "[]");
-    const found = users.find((u) => u.email === email);
-    if (!found) return { success: false, message: "Email not found." };
-    return { success: true, message: "Password reset link sent to your email." };
-  },
-
-  // Reset password
-  resetPassword: (email, newPassword) => {
-    const users = JSON.parse(localStorage.getItem("shc_users") || "[]");
-    const idx = users.findIndex((u) => u.email === email);
-    if (idx === -1) return { success: false, message: "Email not found." };
-    users[idx].password = newPassword;
-    localStorage.setItem("shc_users", JSON.stringify(users));
-    return { success: true };
-  },
-
-  // Restore session on app load
-  restoreSession: () => {
-    const saved =
-      localStorage.getItem("shc_auth") || sessionStorage.getItem("shc_auth");
-    if (saved) {
-      const user = JSON.parse(saved);
+    try {
+      const fresh = await authService.fetchCurrentUser();
+      const user = { ...fresh, role: normalizeRole(fresh.role) };
+      saveUser(user);
       set({ user, isAuthenticated: true, role: user.role });
+    } catch {
+      clearSession();
+      set({ user: null, isAuthenticated: false, role: null });
     }
   },
 
-  // Check if admin
   isAdmin: () => get().role === "admin",
 }));
 

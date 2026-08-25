@@ -1,17 +1,23 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useCartStore from "../store/cartStore";
 import useAuthStore from "../store/authStore";
 import { FaShoppingCart, FaBars, FaTimes } from "react-icons/fa";
 
 function Navbar() {
-  const cart = useCartStore((state) => state.cart);
-  // Sum of all quantities in cart
-  const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const totalQuantity = useCartStore((state) => state.totalItemCount);
+  const fetchCart = useCartStore((state) => state.fetchCart);
+  const resetCart = useCartStore((state) => state.reset);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const logout = useAuthStore((state) => state.logout);
+
+  // The cart lives on the server, so it is only meaningful for signed-in users
+  useEffect(() => {
+    if (isAuthenticated) fetchCart();
+    else resetCart();
+  }, [isAuthenticated, fetchCart, resetCart]);
 
   const navLinks = [
     { to: "/", label: "Home" },
