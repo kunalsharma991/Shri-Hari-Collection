@@ -1,0 +1,121 @@
+// Mock order history data for user accounts
+const orders = [
+  {
+    id: "SHC10023847",
+    date: "2026-05-28",
+    status: "delivered",
+    items: [
+      {
+        id: 4,
+        name: "Women's Designer Kurti",
+        price: 1299,
+        quantity: 2,
+        image: "/images/products/womens-kurti.jpg",
+      },
+      {
+        id: 10,
+        name: "Men's Casual Shoes",
+        price: 1999,
+        quantity: 1,
+        image: "/images/products/shoes.jpg",
+      },
+    ],
+    subtotal: 4597,
+    shipping: 0,
+    total: 4597,
+    paymentMethod: "cod",
+    address: "123 Main Street, Meerut, UP - 250001",
+  },
+  {
+    id: "SHC10023654",
+    date: "2026-05-15",
+    status: "shipped",
+    items: [
+      {
+        id: 5,
+        name: "Women's Silk Saree",
+        price: 2999,
+        quantity: 1,
+        image: "/images/products/womens-saree.jpg",
+      },
+    ],
+    subtotal: 2999,
+    shipping: 0,
+    total: 2999,
+    paymentMethod: "online",
+    address: "456 Park Road, Delhi, DL - 110001",
+  },
+  {
+    id: "SHC10023501",
+    date: "2026-05-02",
+    status: "processing",
+    items: [
+      {
+        id: 1,
+        name: "Premium Men's Shirt",
+        price: 999,
+        quantity: 3,
+        image: "/images/products/shirt.jpg",
+      },
+      {
+        id: 7,
+        name: "Kids Party Dress",
+        price: 799,
+        quantity: 1,
+        image: "/images/products/kids-dress.jpg",
+      },
+    ],
+    subtotal: 3796,
+    shipping: 0,
+    total: 3796,
+    paymentMethod: "cod",
+    address: "789 Market Area, Meerut, UP - 250002",
+  },
+  {
+    id: "SHC10023200",
+    date: "2026-04-18",
+    status: "cancelled",
+    items: [
+      {
+        id: 11,
+        name: "Women's Heeled Sandals",
+        price: 1599,
+        quantity: 1,
+        image: "/images/products/shoes (2).jpg",
+      },
+    ],
+    subtotal: 1599,
+    shipping: 0,
+    total: 1599,
+    paymentMethod: "online",
+    address: "321 Civil Lines, Meerut, UP - 250001",
+  },
+  {
+    id: "SHC10022890",
+    date: "2026-03-25",
+    status: "delivered",
+    items: [
+      {
+        id: 13,
+        name: "Men's Leather Wallet",
+        price: 599,
+        quantity: 2,
+        image: "/images/products/mens-jeans.jpg",
+      },
+      {
+        id: 2,
+        name: "Men's Casual Jeans",
+        price: 1499,
+        quantity: 1,
+        image: "/images/products/mens-jeans.jpg",
+      },
+    ],
+    subtotal: 2697,
+    shipping: 0,
+    total: 2697,
+    paymentMethod: "cod",
+    address: "56 Station Road, Meerut, UP - 250003",
+  },
+];
+
+export default orders;
